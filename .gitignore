@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# After Effects auto-save (regenerates lokalnie)
+Adobe After Effects Auto-Save/
+
+# Renders / eksporty
+Exports/
+
+# Ciężkie assety — trzymamy lokalnie, nie commitujemy
+Assets/Footage/
+Assets/Images/maps1.png
+
+# Inne ciężkie formaty na wszelki wypadek
+*.mov
+*.mp4
+*.mxf
+*.prproj
+*.aep.bak
