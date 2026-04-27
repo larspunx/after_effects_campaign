@@ -17,3 +17,7 @@ Assets/Images/maps1.png
 *.mxf
 *.prproj
 *.aep.bak
+
+# Tymczasowe pliki diagnostyczne ze skryptów
+_layers.txt
+_*.tmp
