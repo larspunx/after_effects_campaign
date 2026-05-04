@@ -9,11 +9,22 @@
     if (!comp) { alert("Nie znaleziono Main_Comp"); return; }
 
     // ── Konfiguracja ───────────────────────────────────────────────────────
+    // Wszystkie samoloty lecą z tą samą średnią prędkością (px/sek w comp space).
+    // Czas lotu (tEnd) jest wyliczany automatycznie z długości trasy.
+    var SPEED_PX_PER_SEC = 220;
+
     var planes = [
-        { name: "PLANE_1", startX: 200,  startY: 400, endX: 1700, endY: 300, arcY: -120, tStart: 1.0,  tEnd: 9.0,  scale: 15 },
-        { name: "PLANE_2", startX: 1800, startY: 250, endX: 150,  endY: 600, arcY:  -80, tStart: 5.0,  tEnd: 14.0, scale: 12 },
-        { name: "PLANE_3", startX: 250,  startY: 700, endX: 1750, endY: 500, arcY: -100, tStart: 11.0, tEnd: 21.0, scale: 10 },
+        { name: "PLANE_1", startX: 200,  startY: 400, endX: 1700, endY: 300, arcY: -120, tStart: 1.0,  scale: 15 },
+        { name: "PLANE_2", startX: 1800, startY: 250, endX: 150,  endY: 600, arcY:  -80, tStart: 5.0,  scale: 12 },
+        { name: "PLANE_3", startX: 250,  startY: 700, endX: 1750, endY: 500, arcY: -100, tStart: 11.0, scale: 10 },
     ];
+
+    // Aproksymacja długości trasy A → mid (z arcY) → Z jako suma odległości euklidesowych
+    function pathLength(sx, sy, mx, my, ex, ey) {
+        var d1 = Math.sqrt((mx - sx) * (mx - sx) + (my - sy) * (my - sy));
+        var d2 = Math.sqrt((ex - mx) * (ex - mx) + (ey - my) * (ey - my));
+        return d1 + d2;
+    }
 
     // ── Import pliku samolotu ──────────────────────────────────────────────
     var planePath = "/Users/mac/tsg/AfterEffects/Assets/Images/icon_airplane.png";
@@ -103,10 +114,22 @@
         [0.3, 1.0, 0.5],  // zielony
     ];
 
+    var summary = [];
+
     for (var p = 0; p < planes.length; p++) {
         var cfg   = planes[p];
-        var dur   = cfg.tEnd - cfg.tStart;
         var col   = colors[p];
+
+        var midX    = (cfg.startX + cfg.endX) / 2;
+        var midY    = ((cfg.startY + cfg.endY) / 2) + cfg.arcY;
+
+        // Czas lotu = długość trasy / prędkość → wszystkie samoloty z tą samą średnią prędkością
+        var lengthPx = pathLength(cfg.startX, cfg.startY, midX, midY, cfg.endX, cfg.endY);
+        var dur      = lengthPx / SPEED_PX_PER_SEC;
+        var tEnd     = cfg.tStart + dur;
+        var tMid     = cfg.tStart + dur / 2;
+
+        summary.push(cfg.name + ": " + lengthPx.toFixed(0) + "px / " + dur.toFixed(2) + "s");
 
         // ── Marker START (A) ───────────────────────────────────────────────
         addMarker("POINT_" + cfg.name + "_A", cfg.startX, cfg.startY,
@@ -116,9 +139,9 @@
 
         // ── Marker END (Z) — pojawia się kiedy samolot dolatuje ───────────
         addMarker("POINT_" + cfg.name + "_Z", cfg.endX, cfg.endY,
-                  col, p + 1, cfg.tEnd - 0.5, comp.duration);
+                  col, p + 1, tEnd - 0.5, comp.duration);
         addLabel("LABEL_" + cfg.name + "_Z", "Z",
-                  cfg.endX, cfg.endY, col, cfg.tEnd - 0.5, comp.duration);
+                  cfg.endX, cfg.endY, col, tEnd - 0.5, comp.duration);
 
         // ── Samolot ────────────────────────────────────────────────────────
         var layer = comp.layers.add(planeFootage, dur);
@@ -130,31 +153,42 @@
         layer.autoOrient = AutoOrientType.ALONG_PATH;
 
         var posProp = layer.property("Position");
-        var midX    = (cfg.startX + cfg.endX) / 2;
-        var midY    = ((cfg.startY + cfg.endY) / 2) + cfg.arcY;
-        var tMid    = cfg.tStart + dur / 2;
-
         posProp.setValueAtTime(cfg.tStart, [cfg.startX, cfg.startY]);
         posProp.setValueAtTime(tMid,       [midX,       midY      ]);
-        posProp.setValueAtTime(cfg.tEnd,   [cfg.endX,   cfg.endY  ]);
+        posProp.setValueAtTime(tEnd,       [cfg.endX,   cfg.endY  ]);
 
-        posProp.setInterpolationTypeAtKey(1, KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
-        posProp.setInterpolationTypeAtKey(2, KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
-        posProp.setInterpolationTypeAtKey(3, KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
+        // Auto-bezier spatial = gładki łuk przez 3 punkty
+        for (var ki = 1; ki <= posProp.numKeys; ki++) {
+            posProp.setSpatialAutoBezierAtKey(ki, true);
+        }
 
-        posProp.setTemporalEaseAtKey(1, [new KeyframeEase(0, 33)], [new KeyframeEase(0, 66)]);
-        posProp.setTemporalEaseAtKey(2, [new KeyframeEase(0, 66)], [new KeyframeEase(0, 66)]);
-        posProp.setTemporalEaseAtKey(3, [new KeyframeEase(0, 66)], [new KeyframeEase(0, 33)]);
+        // Stała prędkość: środkowy keyframe roving (AE rozkłada go proporcjonalnie
+        // do długości krzywej), pierwszy i ostatni linear (bez ease).
+        posProp.setRovingAtKey(2, true);
 
-        layer.property("Opacity").setValueAtTime(cfg.tStart,         0);
+        var linearEase = [new KeyframeEase(0, 33.33)];
+        posProp.setTemporalEaseAtKey(1, linearEase, linearEase);
+        posProp.setTemporalEaseAtKey(3, linearEase, linearEase);
+        posProp.setInterpolationTypeAtKey(1, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);
+        posProp.setInterpolationTypeAtKey(3, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);
+
+        layer.property("Opacity").setValueAtTime(cfg.tStart,       0);
         layer.property("Opacity").setValueAtTime(cfg.tStart + 0.4, 100);
-        layer.property("Opacity").setValueAtTime(cfg.tEnd   - 0.4, 100);
-        layer.property("Opacity").setValueAtTime(cfg.tEnd,           0);
+        layer.property("Opacity").setValueAtTime(tEnd       - 0.4, 100);
+        layer.property("Opacity").setValueAtTime(tEnd,             0);
     }
 
     comp.layer("PLANE_1").selected = true;
     comp.time = 0;
     app.endUndoGroup();
 
-    alert("Gotowe!\n\nKażdy samolot ma:\n• Marker A (kółko) — punkt startu\n• Marker Z (kółko) — punkt lądowania\n• Edytowalną ścieżkę beziera\n\nAby przesunąć punkt A lub Z:\nZaznacz warstwę POINT_PLANE_X_A → P → zmień pozycję\nNastępnie ustaw tę samą pozycję w keyframe startu PLANE_X");
+    alert(
+        "Gotowe! Stała średnia prędkość: " + SPEED_PX_PER_SEC + " px/s\n\n" +
+        summary.join("\n") + "\n\n" +
+        "Każdy samolot ma:\n" +
+        "• Marker A (kółko) — punkt startu\n" +
+        "• Marker Z (kółko) — punkt lądowania\n" +
+        "• Edytowalną ścieżkę beziera\n\n" +
+        "Aby zmienić prędkość — edytuj SPEED_PX_PER_SEC u góry skryptu i uruchom ponownie."
+    );
 })();

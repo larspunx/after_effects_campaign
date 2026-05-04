@@ -38,26 +38,34 @@ for v in 2026 2025 2024; do
 done
 [[ -n "$APP_NAME" ]] || { echo "Nie znaleziono Adobe After Effects." >&2; exit 1; }
 
-# Tryb cichy: prepend "alert = function(){}" przed właściwym JSX,
-# i append "app.project.save()" — zabezpieczenie przed crashem AE.
+# Tryb cichy/alerty: tworzymy mały loader, który evalFile()-uje
+# oryginalny skrypt. Dzięki temu wewnątrz docelowego skryptu
+# $.fileName wskazuje na ORYGINALNĄ ścieżkę (a nie na temp).
+TMP="$(mktemp -t aescript).jsx"
+trap 'rm -f "$TMP"' EXIT
+
 if [[ "$ALERTS" == "--alerts" ]]; then
-  TMP="$(mktemp -t aescript).jsx"
-  trap 'rm -f "$TMP"' EXIT
-  {
-    cat "$SCRIPT_PATH"
-    printf '\ntry { if (app.project.file) app.project.save(); } catch(e) {}\n'
-  } > "$TMP"
-  RUN_PATH="$TMP"
+  ALERT_LINE=""
 else
-  TMP="$(mktemp -t aescript).jsx"
-  trap 'rm -f "$TMP"' EXIT
-  {
-    printf 'alert = function(){};\n'
-    cat "$SCRIPT_PATH"
-    printf '\ntry { if (app.project.file) app.project.save(); } catch(e) {}\n'
-  } > "$TMP"
-  RUN_PATH="$TMP"
+  ALERT_LINE="alert = function(){};"
 fi
+
+# Escape backslashes and double quotes in path for safe embedding in JSX string.
+ESCAPED_PATH="${SCRIPT_PATH//\\/\\\\}"
+ESCAPED_PATH="${ESCAPED_PATH//\"/\\\"}"
+
+cat > "$TMP" <<EOF_LOADER
+${ALERT_LINE}
+try {
+    \$.evalFile(new File("${ESCAPED_PATH}"));
+} catch (e) {
+    \$.writeln("[run.sh] Skrypt rzucił wyjątek: " + e.toString());
+    try { alert("Błąd skryptu:\n" + e.toString()); } catch (_) {}
+}
+try { if (app.project.file) app.project.save(); } catch(e) {}
+EOF_LOADER
+
+RUN_PATH="$TMP"
 
 echo "Uruchamiam: $(basename "$SCRIPT_PATH") w $APP_NAME"
 

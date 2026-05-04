@@ -1,0 +1,43 @@
+(function () {
+    app.beginUndoGroup("Revert flag changes");
+    var MULT = 3;
+
+    for (var i = 1; i <= app.project.numItems; i++) {
+        var it = app.project.item(i);
+        if (!(it instanceof CompItem)) continue;
+        for (var li = 1; li <= it.numLayers; li++) {
+            var L = it.layer(li);
+            if (L.name.toLowerCase().indexOf("flag") < 0) continue;
+
+            var rot = L.property("Rotation");
+            // Tylko flagi z expression na Rotation (sygnatura "trzymanie poziomu")
+            if (!rot || !rot.expressionEnabled) continue;
+
+            var sc = L.property("Scale");
+            if (!sc) continue;
+
+            // 1) Usuń expression na Scale
+            try {
+                sc.expression = "";
+            } catch (e) {}
+
+            // 2) Podziel wartość bazową przez 3 (cofnięcie bumpu)
+            try {
+                if (sc.numKeys > 0) {
+                    for (var k = 1; k <= sc.numKeys; k++) {
+                        var v = sc.keyValue(k);
+                        sc.setValueAtKey(k, [v[0] / MULT, v[1] / MULT, v.length > 2 ? v[2] : 100]);
+                    }
+                } else {
+                    var cur = sc.value;
+                    sc.setValue([cur[0] / MULT, cur[1] / MULT, cur.length > 2 ? cur[2] : 100]);
+                }
+            } catch (e) {}
+
+            // 3) Wyczyść Comment (z diagnostyk)
+            try { L.comment = ""; } catch (e) {}
+        }
+    }
+
+    app.endUndoGroup();
+})();
